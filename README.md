@@ -23,5 +23,5 @@ Do note that im still learning go.
 - Set the `VERIFY_TIMEOUT`, this is how many minutes the verification link will be valid for (default is 2 minutes).
 
 # TODO
-[ ] Captcha implementation
-[ ] Check for VPN/Proxy using some IP Api idk
+- [ ] Captcha implementation
+- [ ] Check for VPN/Proxy using some IP Api idk
