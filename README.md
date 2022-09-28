@@ -21,3 +21,7 @@ Do note that im still learning go.
 - Set the port in the .env file, make sure it has a leading `:`
 - Set the `CAPTCHA_KEY`, this uses Google's RECAPTCHAv3 (the hidden one)
 - Set the `VERIFY_TIMEOUT`, this is how many minutes the verification link will be valid for (default is 2 minutes).
+
+# TODO
+[ ] Captcha implementation
+[ ] Check for VPN/Proxy using some IP Api idk
