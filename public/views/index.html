@@ -7,13 +7,41 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="/index.css">
+    <script src="https://www.google.com/recaptcha/api.js?render={{.SiteKey}}"></script>
     <title>Verification</title>
 </head>
 
-<body>
+<script>
+    function setStatus(to) {
+        document.getElementById("status").innerHTML = to;
+    }
+
+    function onLoad() {
+        grecaptcha.ready(() => {
+            grecaptcha.execute('{{.SiteKey}}', { action: 'submit' }).then((token) => {
+                fetch(window.location, {
+                    method: 'POST',
+                    body: token,
+                    headers: { 'Content-Type': 'application/json' }
+                }).then(async (response) => {
+                    if (response.status !== 200) {
+                        let data = await response.json()
+                        setStatus(data['error'])
+                    } else {
+                        setStatus("Verified! you can now close this")
+                    }
+                }).catch((response) => {
+                    console.log(response)
+                })
+            });
+        });
+    }
+</script>
+
+<body onload="onLoad()">
     <div class="center">
         <img src="{{.Avatar}}" alt="">
-        <h1>{{.Status}}</h1>
+        <h1 id="status">{{.Status}}</h1>
     </div>
 </body>
 

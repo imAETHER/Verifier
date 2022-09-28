@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"log"
 	"math/rand"
@@ -16,6 +17,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"github.com/gofiber/template/html"
+	recaptcha "github.com/r7com/go-recaptcha-v3"
 )
 
 type GConfig struct {
@@ -49,8 +51,10 @@ var (
 	guildConfigs    []GConfig
 	verifyTracker   []*VUser
 	discord         *discordgo.Session
-	verificationUrl = os.Getenv("URL_AND_PATH")
-	commands        = []*discordgo.ApplicationCommand{
+	verificationUrl string
+	siteKey         string
+
+	commands = []*discordgo.ApplicationCommand{
 		{
 			Name:        "setup",
 			Description: "The basic setup command",
@@ -77,6 +81,42 @@ var (
 			Description: "Sends you a DM to verify",
 		},
 	}
+
+	commandHandlers = map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate){}
+)
+
+func init() {
+	envErr := godotenv.Load()
+	if envErr != nil {
+		log.Fatal("Error loading .env file")
+	}
+
+	// Set some vars
+	verificationUrl = os.Getenv("URL_AND_PATH")
+	siteKey = os.Getenv("CAPTCHA_SITEKEY")
+
+	timeout, err2 := strconv.Atoi(os.Getenv("VERIFY_TIMEOUT"))
+	if err2 != nil {
+		log.Fatal("Invalid integer in .env (VERIFY_TIMOUT)")
+	}
+	verifyTimeout = timeout
+
+	// Load guild configs
+
+	gb, readErr := os.ReadFile("guilds.json")
+	if readErr != nil {
+		color.Red("Failed to read guild configs file, create it. 'guilds.json'")
+	}
+
+	json.Unmarshal(gb, &guildConfigs)
+
+	var botErr error
+	discord, botErr = discordgo.New("Bot " + os.Getenv("TOKEN"))
+	if botErr != nil {
+		log.Fatal(botErr)
+	}
+
+	// Loading the command handler here because otherwise the env vars won't be loaded
 
 	commandHandlers = map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate){
 		"setup": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -221,41 +261,13 @@ var (
 							discordgo.Button{
 								Style: discordgo.LinkButton,
 								Label: "Click to Verify",
-								URL:   verificationUrl + "/verify?id=" + requestId,
+								URL:   verificationUrl + "?id=" + requestId,
 							},
 						},
 					},
 				},
 			})
 		},
-	}
-)
-
-func init() {
-	envErr := godotenv.Load()
-	if envErr != nil {
-		log.Fatal("Error loading .env file")
-	}
-
-	timeout, err2 := strconv.Atoi(os.Getenv("VERIFY_TIMEOUT"))
-	if err2 != nil {
-		log.Fatal("Invalid integer in .env (VERIFY_TIMOUT)")
-	}
-	verifyTimeout = timeout
-
-	// Load guild configs
-
-	gb, readErr := os.ReadFile("guilds.json")
-	if readErr != nil {
-		color.Red("Failed to read guild configs file, create it. 'guilds.json'")
-	}
-
-	json.Unmarshal(gb, &guildConfigs)
-
-	var botErr error
-	discord, botErr = discordgo.New("Bot " + os.Getenv("TOKEN"))
-	if botErr != nil {
-		log.Fatal(botErr)
 	}
 
 	discord.AddHandler(func(s *discordgo.Session, r *discordgo.Ready) {
@@ -294,7 +306,6 @@ func main() {
 	color.Cyan("[i] Setting up..")
 
 	engine := html.New("./public/views", ".html")
-
 	engine.Delims("{{", "}}")
 
 	app := fiber.New(fiber.Config{
@@ -302,6 +313,8 @@ func main() {
 		AppName:            "Verifier v1.0",
 		EnableIPValidation: true,
 	})
+
+	recaptcha.Init(os.Getenv("CAPTCHA_SECRET"), 0.6, 5000)
 
 	// Make sure you do this for any file/assets you include in your html otherwise they wont load. learnt the hard way.
 	app.Static("/", "./public/css")
@@ -315,6 +328,56 @@ func main() {
 		}
 
 		var user *VUser
+		for _, vu := range verifyTracker {
+			if vu.RID == ctx.Query("id") {
+				user = vu
+				break
+			}
+		}
+
+		if user == nil {
+			return ctx.Status(404).Render("index", fiber.Map{
+				"SiteKey": siteKey,
+				"Avatar":  "https://cdn.discordapp.com/attachments/902975615014150174/920851081645400084/crosscircle.png",
+				"Status":  "This link expired!",
+			})
+		}
+
+		// TODO: check if the IP is from a VPN/Proxy
+		if time.Duration(user.RTime-time.Now().UnixMilli()) > (time.Duration(verifyTimeout) * time.Minute) {
+			return ctx.Status(200).Render("index", fiber.Map{
+				"SiteKey": siteKey,
+				"Avatar":  "https://cdn.discordapp.com/attachments/902975615014150174/920851081645400084/crosscircle.png",
+				"Status":  "This link expired!",
+			})
+		}
+
+		duser, uerr := discord.User(user.UserID)
+		if uerr != nil {
+			return ctx.Status(404).Render("index", fiber.Map{
+				"SiteKey": siteKey,
+				"Avatar":  "https://cdn.discordapp.com/attachments/902975615014150174/920945910589059102/userremoved.png",
+				"Status":  "I couldn't find you!",
+			})
+		}
+
+		return ctx.Status(200).Render("index", fiber.Map{
+			"SiteKey": siteKey,
+			"Avatar":  duser.AvatarURL(""),
+			"Status":  "Verifying...",
+		})
+	})
+
+	// Actual captcha verification here.
+	app.Post("/verify", func(ctx *fiber.Ctx) error {
+		res := map[string]interface{}{}
+
+		if len(ctx.Query("id")) != 10 {
+			res["error"] = "Invalid ID"
+			return ctx.Status(400).JSON(res)
+		}
+
+		var user *VUser
 		var userIndex int
 		for i, vu := range verifyTracker {
 			if vu.RID == ctx.Query("id") {
@@ -325,52 +388,40 @@ func main() {
 		}
 
 		if user == nil {
-			return ctx.Status(404).Render("index", fiber.Map{
-				"Avatar": "https://cdn.discordapp.com/attachments/902975615014150174/920851081645400084/crosscircle.png",
-				"Status": "This link expired!",
-			})
+			res["error"] = "Link expired"
+			return ctx.Status(404).JSON(res)
 		}
 
 		// Remove from verifyTracker
 		verifyTracker[userIndex] = verifyTracker[len(verifyTracker)-1]
 		verifyTracker = verifyTracker[:len(verifyTracker)-1]
 
-		// TODO: check if the IP is from a VPN/Proxy & add Google's RECAPTCHAv3
+		// TODO: check if the IP is from a VPN/Proxy
+
 		if time.Duration(user.RTime-time.Now().UnixMilli()) > (time.Duration(verifyTimeout) * time.Minute) {
-			return ctx.Status(200).Render("index", fiber.Map{
-				"Avatar": "https://cdn.discordapp.com/attachments/902975615014150174/920851081645400084/crosscircle.png",
-				"Status": "This link expired!",
-			})
+			res["error"] = fmt.Sprintf("Link expired after %d mins.", verifyTimeout)
+			return ctx.Status(400).JSON(res)
 		}
 
-		duser, uerr := discord.User(user.UserID)
-		if uerr != nil {
-			return ctx.Status(404).Render("index", fiber.Map{
-				"Avatar": "https://cdn.discordapp.com/attachments/902975615014150174/920945910589059102/userremoved.png",
-				"Status": "I couldn't find you!",
-			})
+		// Confirm the captcha
+		result, cerr := recaptcha.Confirm(string(ctx.Body()), ctx.IP())
+		if cerr != nil {
+			res["error"] = "Failed to verify"
+			return ctx.Status(500).JSON(res)
 		}
 
-		_, gerr := discord.Guild(user.RGuildID)
-		if gerr != nil {
-			return ctx.Status(404).Render("index", fiber.Map{
-				"Avatar": "https://cdn.discordapp.com/attachments/902975615014150174/920851081645400084/crosscircle.png",
-				"Status": "Failed to get guild!",
-			})
+		if !result {
+			res["error"] = "Captcha verification failed"
+			return ctx.Status(400).JSON(res)
 		}
 
-		rerr := discord.GuildMemberRoleAdd(user.RGuildID, user.UserID, user.RoleID)
-		if rerr != nil {
-			return ctx.Status(500).Render("index", fiber.Map{
-				"Avatar": duser.AvatarURL(""),
-				"Status": "Failed to give you the role",
-			})
+		err := discord.GuildMemberRoleAdd(user.RGuildID, user.UserID, user.RoleID)
+		if err != nil {
+			res["error"] = "Failed to add role"
+			return ctx.Status(500).JSON(res)
 		}
 
-		return ctx.Status(200).Render("index", fiber.Map{
-			"Avatar": duser.AvatarURL(""),
-			"Status": "Verified! you can now close this",
-		})
+		return ctx.SendStatus(200)
 	})
 
 	color.Cyan("[i] Starting WebServer on port " + os.Getenv("PORT"))
