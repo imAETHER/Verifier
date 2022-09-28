@@ -19,7 +19,7 @@ Do note that im still learning go.
 
 # Usage
 - Set the port in the .env file, make sure it has a leading `:`
-- Set the `CAPTCHA_KEY`, this uses Google's RECAPTCHAv3 (the hidden one)
+- Set the `CAPTCHA_KEY` & `CAPTCHA_SECRET`, this uses Google's RECAPTCHAv3 (the hidden one)
 - Set the `VERIFY_TIMEOUT`, this is how many minutes the verification link will be valid for (default is 2 minutes).
 
 # TODO
