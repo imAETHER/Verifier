@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"log"
 	"math/rand"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -34,6 +35,17 @@ type VUser struct {
 	RoleID   string
 }
 
+type IpInfoBody struct {
+	Status            string `json:"status"`
+	Result            string `json:"result"`
+	QueryIP           string `json:"queryIP"`
+	QueryFlags        string `json:"queryFlags"`
+	QueryOFlags       string `json:"queryOFlags"`
+	QueryFormat       string `json:"queryFormat"`
+	Contact           string `json:"contact"`
+	ICloudRelayEgress int    `json:"iCloudRelayEgress"`
+}
+
 // Yes this is from an example I found on google.
 const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
@@ -53,8 +65,8 @@ var (
 	discord         *discordgo.Session
 	verificationUrl string
 	siteKey         string
-
-	commands = []*discordgo.ApplicationCommand{
+	contactEmail    string
+	commands        = []*discordgo.ApplicationCommand{
 		{
 			Name:        "setup",
 			Description: "The basic setup command",
@@ -108,12 +120,14 @@ func init() {
 		color.Red("Failed to read guild configs file, create it. 'guilds.json'")
 	}
 
-	json.Unmarshal(gb, &guildConfigs)
+	err := json.Unmarshal(gb, &guildConfigs)
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	var botErr error
-	discord, botErr = discordgo.New("Bot " + os.Getenv("TOKEN"))
-	if botErr != nil {
-		log.Fatal(botErr)
+	discord, err = discordgo.New("Bot " + os.Getenv("TOKEN"))
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	// Loading the command handler here because otherwise the env vars won't be loaded
@@ -126,11 +140,15 @@ func init() {
 			verifiedRole := opts[1].RoleValue(s, i.GuildID)
 
 			if verifyChannel == nil {
-				s.ChannelMessageSend(i.ChannelID, "I couldn't get the channel, is it invalid?")
+				_, err := s.ChannelMessageSend(i.ChannelID, "I couldn't get the channel, is it invalid?")
+				if err != nil {
+					log.Println("Failed to send message to channel " + i.ChannelID)
+					return
+				}
 				return
 			}
 
-			s.ChannelMessageSendComplex(verifyChannel.ID, &discordgo.MessageSend{
+			_, err = s.ChannelMessageSendComplex(verifyChannel.ID, &discordgo.MessageSend{
 				Embeds: []*discordgo.MessageEmbed{{
 					Description: "To access the server you must verify, if you didn't get a DM:",
 					Fields: []*discordgo.MessageEmbedField{
@@ -150,8 +168,11 @@ func init() {
 					Color: 11953908,
 				}},
 			})
+			if err != nil {
+				log.Println("Failed to send message to channel " + i.ChannelID)
+				return
+			}
 
-			// i am so tired rn
 			// basically this whole thing appends to the existing json, thats it.
 			gb, readErr := os.ReadFile("guilds.json")
 			if readErr != nil {
@@ -159,7 +180,11 @@ func init() {
 			}
 
 			guildConfigs = []GConfig{}
-			json.Unmarshal(gb, &guildConfigs)
+			err = json.Unmarshal(gb, &guildConfigs)
+			if err != nil {
+				log.Println("Failed to parse JSON")
+				return
+			}
 
 			var foundOld = false
 			for index, gcold := range guildConfigs {
@@ -187,10 +212,14 @@ func init() {
 				color.Red("Failed to marshal a new guild config, :C")
 			}
 
-			os.WriteFile("guilds.json", bm, fs.FileMode(os.O_CREATE|os.O_RDWR))
+			err = os.WriteFile("guilds.json", bm, fs.FileMode(os.O_CREATE|os.O_RDWR))
+			if err != nil {
+				log.Println("Failed to write to guilds.json ")
+				return
+			}
 
 			// Respond with status
-			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
 					Embeds: []*discordgo.MessageEmbed{
@@ -204,6 +233,10 @@ func init() {
 					},
 				},
 			})
+			if err != nil {
+				log.Println("Failed to send message to channel " + i.ChannelID)
+				return
+			}
 		},
 		"verify": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			var vguild GConfig
@@ -213,18 +246,26 @@ func init() {
 				}
 			}
 
-			dm, dmErr := s.UserChannelCreate(i.Member.User.ID)
-			if dmErr != nil {
-				s.ChannelMessageSend(vguild.ChannelID, i.Member.Mention()+" I couldn't send you a DM, please go to settings and allow DMs from this server, then run the `/verify` command again.")
+			dm, err := s.UserChannelCreate(i.Member.User.ID)
+			if err != nil {
+				_, err := s.ChannelMessageSend(vguild.ChannelID, i.Member.Mention()+" I couldn't send you a DM, please go to settings and allow DMs from this server, then run the `/verify` command again.")
+				if err != nil {
+					log.Println("Failed to send message to channel " + i.ChannelID)
+					return
+				}
 				return
 			}
 
-			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
 					Content: "I've sent you a DM!",
 				},
 			})
+			if err != nil {
+				log.Println("Failed to send message to channel " + i.ChannelID)
+				return
+			}
 
 			requestId := randomString(10)
 
@@ -236,7 +277,7 @@ func init() {
 				RTime:    time.Now().UnixMilli(),
 			})
 
-			s.ChannelMessageSendComplex(dm.ID, &discordgo.MessageSend{
+			_, err = s.ChannelMessageSendComplex(dm.ID, &discordgo.MessageSend{
 				Embeds: []*discordgo.MessageEmbed{{
 					Description: "To access the server you must verify, please make sure you:",
 					Fields: []*discordgo.MessageEmbedField{
@@ -267,13 +308,20 @@ func init() {
 					},
 				},
 			})
+			if err != nil {
+				log.Println("Failed to send message to channel " + i.ChannelID)
+				return
+			}
 		},
 	}
 
 	discord.AddHandler(func(s *discordgo.Session, r *discordgo.Ready) {
 		color.Green("[i | Login] Connected to %s#%s", r.User.Username, r.User.Discriminator)
 
-		s.UpdateStreamingStatus(0, "with Aether", "https://github.com/ImAETHER")
+		err = s.UpdateStreamingStatus(0, "with Aether", "https://github.com/ImAETHER")
+		if err != nil {
+			log.Println("Failed to set status")
+		}
 	})
 
 	discord.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -286,7 +334,7 @@ func init() {
 		}
 	})
 
-	err := discord.Open()
+	err = discord.Open()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -300,6 +348,7 @@ func init() {
 		}
 		registeredCommands[i] = cmd
 	}
+	contactEmail = os.Getenv("EMAIL")
 }
 
 func main() {
@@ -308,11 +357,17 @@ func main() {
 	engine := html.New("./public/views", ".html")
 	engine.Delims("{{", "}}")
 
-	app := fiber.New(fiber.Config{
+	fiberConfig := fiber.Config{
 		Views:              engine,
 		AppName:            "Verifier v1.0",
 		EnableIPValidation: true,
-	})
+	}
+
+	if usingCF := os.Getenv("USING_CF"); usingCF == "true" {
+		fiberConfig.ProxyHeader = "CF-Connecting-IP"
+	}
+
+	app := fiber.New(fiberConfig)
 
 	recaptcha.Init(os.Getenv("CAPTCHA_SECRET"), 0.6, 5000)
 
@@ -343,7 +398,6 @@ func main() {
 			})
 		}
 
-		// TODO: check if the IP is from a VPN/Proxy
 		if time.Duration(user.RTime-time.Now().UnixMilli()) > (time.Duration(verifyTimeout) * time.Minute) {
 			return ctx.Status(200).Render("index", fiber.Map{
 				"SiteKey": siteKey,
@@ -392,11 +446,40 @@ func main() {
 			return ctx.Status(404).JSON(res)
 		}
 
+		// Check for VPN/Proxy
+		response, err := http.Get(fmt.Sprintf("https://check.getipintel.net/check.php?ip=%s&contact=%s&format=json&flags=bm&oflags=i", ctx.IP(), contactEmail))
+		if err != nil {
+			res["error"] = "failed to verify IP"
+			// can be rewritten as 500 instead of using fiber's exported vars
+			return ctx.Status(fiber.StatusInternalServerError).JSON(res)
+		}
+
+		var ipCheck IpInfoBody
+		err = json.NewDecoder(response.Body).Decode(&ipCheck)
+		if err != nil {
+			res["error"] = "failed to parse IP verifier"
+			// can be rewritten as 500 instead of using fiber's exported vars
+			return ctx.Status(fiber.StatusInternalServerError).JSON(res)
+		}
+
+		iPCheckResult, err := strconv.ParseFloat(ipCheck.Result, 32)
+		if err != nil {
+			res["error"] = "failed to parse IP result"
+			// can be rewritten as 500 instead of using fiber's exported vars
+			return ctx.Status(fiber.StatusInternalServerError).JSON(res)
+		}
+
+		// you can change this value I noticed it sits around 0.7 for me while working on this (I'm at school :laugh:)
+		if iPCheckResult >= 1.0 {
+			// TODO: Make handler if a VPN/Proxy has been detected
+			res["error"] = "IP/Proxy detected"
+			// can be rewritten as 500 instead of using fiber's exported vars
+			return ctx.Status(fiber.StatusBadRequest).JSON(res)
+		}
+
 		// Remove from verifyTracker
 		verifyTracker[userIndex] = verifyTracker[len(verifyTracker)-1]
 		verifyTracker = verifyTracker[:len(verifyTracker)-1]
-
-		// TODO: check if the IP is from a VPN/Proxy
 
 		if time.Duration(user.RTime-time.Now().UnixMilli()) > (time.Duration(verifyTimeout) * time.Minute) {
 			res["error"] = fmt.Sprintf("Link expired after %d mins.", verifyTimeout)
@@ -404,8 +487,8 @@ func main() {
 		}
 
 		// Confirm the captcha
-		result, cerr := recaptcha.Confirm(string(ctx.Body()), ctx.IP())
-		if cerr != nil {
+		result, err := recaptcha.Confirm(string(ctx.Body()), ctx.IP())
+		if err != nil {
 			res["error"] = "Failed to verify"
 			return ctx.Status(500).JSON(res)
 		}
@@ -415,7 +498,7 @@ func main() {
 			return ctx.Status(400).JSON(res)
 		}
 
-		err := discord.GuildMemberRoleAdd(user.RGuildID, user.UserID, user.RoleID)
+		err = discord.GuildMemberRoleAdd(user.RGuildID, user.UserID, user.RoleID)
 		if err != nil {
 			res["error"] = "Failed to add role"
 			return ctx.Status(500).JSON(res)
