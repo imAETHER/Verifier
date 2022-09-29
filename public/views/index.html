@@ -16,12 +16,19 @@
         document.getElementById("status").innerHTML = to;
     }
 
-    function onLoad() {
+    async function onLoad() {
+        const fp = await import('https://openfpcdn.io/fingerprintjs/v3')
+                .then(f => f.load());
         grecaptcha.ready(() => {
-            grecaptcha.execute('{{.SiteKey}}', { action: 'submit' }).then((token) => {
+            grecaptcha.execute('{{.SiteKey}}', { action: 'submit' }).then(async (token) => {
+                let data = {
+                    token,
+                    print: (await fp.get()).visitorId
+                }
+
                 fetch(window.location, {
                     method: 'POST',
-                    body: token,
+                    body: JSON.stringify(data),
                     headers: { 'Content-Type': 'application/json' }
                 }).then(async (response) => {
                     if (response.status !== 200) {

@@ -22,17 +22,23 @@ import (
 )
 
 type GConfig struct {
-	ID        string `json:"guildId"`
-	ChannelID string `json:"channelId"`
-	RoleID    string `json:"roleId"`
+	ID            string `json:"guildId"`
+	ChannelID     string `json:"channelId"`
+	RoleID        string `json:"roleId"`
+	LogsChannelID string `json:"logsChannelId"`
 }
 
 type VUser struct {
-	RID      string
-	UserID   string
-	RGuildID string
-	RTime    int64
-	RoleID   string
+	RID           string
+	UserID        string
+	RTime         int64
+	VerifyMessage *discordgo.Message
+	VGuild        GConfig
+}
+
+type VData struct {
+	Fingerprint  string `json:"print"`
+	CaptchaToken string `json:"token"`
 }
 
 type IpInfoBody struct {
@@ -74,6 +80,15 @@ var (
 				{
 					Name:        "verify-channel",
 					Description: "The channel where users can do /verify if a DM isn't sent",
+					Type:        discordgo.ApplicationCommandOptionChannel,
+					ChannelTypes: []discordgo.ChannelType{
+						discordgo.ChannelTypeGuildText,
+					},
+					Required: true,
+				},
+				{
+					Name:        "logs-channel",
+					Description: "The channel where verification logs will be sent",
 					Type:        discordgo.ApplicationCommandOptionChannel,
 					ChannelTypes: []discordgo.ChannelType{
 						discordgo.ChannelTypeGuildText,
@@ -137,13 +152,21 @@ func init() {
 			opts := i.ApplicationCommandData().Options
 
 			verifyChannel := opts[0].ChannelValue(s)
-			verifiedRole := opts[1].RoleValue(s, i.GuildID)
+			logsChannel := opts[1].ChannelValue(s)
+			verifiedRole := opts[2].RoleValue(s, i.GuildID)
 
 			if verifyChannel == nil {
-				_, err := s.ChannelMessageSend(i.ChannelID, "I couldn't get the channel, is it invalid?")
+				_, err := s.ChannelMessageSend(i.ChannelID, "I couldn't get the verify channel, is it invalid?")
 				if err != nil {
 					log.Println("Failed to send message to channel " + i.ChannelID)
-					return
+				}
+				return
+			}
+
+			if logsChannel == nil {
+				_, err := s.ChannelMessageSend(i.ChannelID, "I couldn't get the logs channel, is it invalid?")
+				if err != nil {
+					log.Println("Failed to send message to channel " + i.ChannelID)
 				}
 				return
 			}
@@ -191,9 +214,10 @@ func init() {
 				if gcold.ID == i.GuildID {
 					// Don't add a new one, just change the old one
 					guildConfigs[index] = GConfig{
-						ID:        i.GuildID,
-						ChannelID: verifyChannel.ID,
-						RoleID:    verifiedRole.ID,
+						ID:            i.GuildID,
+						ChannelID:     verifyChannel.ID,
+						RoleID:        verifiedRole.ID,
+						LogsChannelID: logsChannel.ID,
 					}
 					foundOld = true
 				}
@@ -201,9 +225,10 @@ func init() {
 
 			if !foundOld {
 				guildConfigs = append(guildConfigs, GConfig{
-					ID:        i.GuildID,
-					ChannelID: verifyChannel.ID,
-					RoleID:    verifiedRole.ID,
+					ID:            i.GuildID,
+					ChannelID:     verifyChannel.ID,
+					RoleID:        verifiedRole.ID,
+					LogsChannelID: logsChannel.ID,
 				})
 			}
 
@@ -246,6 +271,23 @@ func init() {
 				}
 			}
 
+			// Check if the user already has the verified role
+			for _, r := range i.Member.Roles {
+				if r == vguild.RoleID {
+					err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Flags:   discordgo.MessageFlagsEphemeral,
+							Content: "You've already been verified",
+						},
+					})
+					if err != nil {
+						log.Println("Failed to send message to channel " + i.ChannelID)
+					}
+					return
+				}
+			}
+
 			dm, err := s.UserChannelCreate(i.Member.User.ID)
 			if err != nil {
 				_, err := s.ChannelMessageSend(vguild.ChannelID, i.Member.Mention()+" I couldn't send you a DM, please go to settings and allow DMs from this server, then run the `/verify` command again.")
@@ -259,6 +301,7 @@ func init() {
 			err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
+					Flags:   discordgo.MessageFlagsEphemeral,
 					Content: "I've sent you a DM!",
 				},
 			})
@@ -269,15 +312,7 @@ func init() {
 
 			requestId := randomString(10)
 
-			verifyTracker = append(verifyTracker, &VUser{
-				RoleID:   vguild.RoleID,
-				RID:      requestId,
-				UserID:   i.Member.User.ID,
-				RGuildID: i.GuildID,
-				RTime:    time.Now().UnixMilli(),
-			})
-
-			_, err = s.ChannelMessageSendComplex(dm.ID, &discordgo.MessageSend{
+			m, err := s.ChannelMessageSendComplex(dm.ID, &discordgo.MessageSend{
 				Embeds: []*discordgo.MessageEmbed{{
 					Description: "To access the server you must verify, please make sure you:",
 					Fields: []*discordgo.MessageEmbedField{
@@ -312,6 +347,14 @@ func init() {
 				log.Println("Failed to send message to channel " + i.ChannelID)
 				return
 			}
+
+			verifyTracker = append(verifyTracker, &VUser{
+				VGuild:        vguild,
+				RID:           requestId,
+				UserID:        i.Member.User.ID,
+				RTime:         time.Now().UnixMilli(),
+				VerifyMessage: m,
+			})
 		},
 	}
 
@@ -376,7 +419,7 @@ func main() {
 
 	app.Get("/verify", func(ctx *fiber.Ctx) error {
 		if len(ctx.Query("id")) != 10 {
-			return ctx.Status(400).Render("index", fiber.Map{
+			return ctx.Status(fiber.StatusBadRequest).Render("index", fiber.Map{
 				"Avatar": "https://cdn.discordapp.com/attachments/902975615014150174/920851081645400084/crosscircle.png",
 				"Status": "Invalid verification ID",
 			})
@@ -391,7 +434,7 @@ func main() {
 		}
 
 		if user == nil {
-			return ctx.Status(404).Render("index", fiber.Map{
+			return ctx.Status(fiber.StatusNotFound).Render("index", fiber.Map{
 				"SiteKey": siteKey,
 				"Avatar":  "https://cdn.discordapp.com/attachments/902975615014150174/920851081645400084/crosscircle.png",
 				"Status":  "This link expired!",
@@ -399,7 +442,7 @@ func main() {
 		}
 
 		if time.Duration(user.RTime-time.Now().UnixMilli()) > (time.Duration(verifyTimeout) * time.Minute) {
-			return ctx.Status(200).Render("index", fiber.Map{
+			return ctx.Status(fiber.StatusOK).Render("index", fiber.Map{
 				"SiteKey": siteKey,
 				"Avatar":  "https://cdn.discordapp.com/attachments/902975615014150174/920851081645400084/crosscircle.png",
 				"Status":  "This link expired!",
@@ -408,14 +451,14 @@ func main() {
 
 		duser, uerr := discord.User(user.UserID)
 		if uerr != nil {
-			return ctx.Status(404).Render("index", fiber.Map{
+			return ctx.Status(fiber.StatusNotFound).Render("index", fiber.Map{
 				"SiteKey": siteKey,
 				"Avatar":  "https://cdn.discordapp.com/attachments/902975615014150174/920945910589059102/userremoved.png",
 				"Status":  "I couldn't find you!",
 			})
 		}
 
-		return ctx.Status(200).Render("index", fiber.Map{
+		return ctx.Status(fiber.StatusOK).Render("index", fiber.Map{
 			"SiteKey": siteKey,
 			"Avatar":  duser.AvatarURL(""),
 			"Status":  "Verifying...",
@@ -428,7 +471,7 @@ func main() {
 
 		if len(ctx.Query("id")) != 10 {
 			res["error"] = "Invalid ID"
-			return ctx.Status(400).JSON(res)
+			return ctx.Status(fiber.StatusBadRequest).JSON(res)
 		}
 
 		var user *VUser
@@ -443,37 +486,55 @@ func main() {
 
 		if user == nil {
 			res["error"] = "Link expired"
-			return ctx.Status(404).JSON(res)
+			return ctx.Status(fiber.StatusNotFound).JSON(res)
+		}
+
+		var verifyData VData
+		err := json.Unmarshal(ctx.Body(), &verifyData)
+		if err != nil {
+			res["error"] = "Failed to parse verification data"
+			return ctx.Status(fiber.StatusInternalServerError).JSON(res)
 		}
 
 		// Check for VPN/Proxy
 		response, err := http.Get(fmt.Sprintf("https://check.getipintel.net/check.php?ip=%s&contact=%s&format=json&flags=bm&oflags=i", ctx.IP(), contactEmail))
 		if err != nil {
-			res["error"] = "failed to verify IP"
-			// can be rewritten as 500 instead of using fiber's exported vars
+			res["error"] = "Failed to verify IP"
 			return ctx.Status(fiber.StatusInternalServerError).JSON(res)
 		}
 
 		var ipCheck IpInfoBody
 		err = json.NewDecoder(response.Body).Decode(&ipCheck)
 		if err != nil {
-			res["error"] = "failed to parse IP verifier"
-			// can be rewritten as 500 instead of using fiber's exported vars
+			res["error"] = "Failed to parse IP verifier"
 			return ctx.Status(fiber.StatusInternalServerError).JSON(res)
 		}
 
 		iPCheckResult, err := strconv.ParseFloat(ipCheck.Result, 32)
 		if err != nil {
-			res["error"] = "failed to parse IP result"
-			// can be rewritten as 500 instead of using fiber's exported vars
+			res["error"] = "Failed to parse IP result"
 			return ctx.Status(fiber.StatusInternalServerError).JSON(res)
 		}
 
 		// you can change this value I noticed it sits around 0.7 for me while working on this (I'm at school :laugh:)
 		if iPCheckResult >= 1.0 {
-			// TODO: Make handler if a VPN/Proxy has been detected
+			_, err := discord.ChannelMessageEditComplex(discordgo.NewMessageEdit(user.VerifyMessage.ChannelID, user.VerifyMessage.ID).SetEmbed(
+				&discordgo.MessageEmbed{
+					Description: "Verification failed due to the use of a Proxy/VPN. Please disable it and try again.",
+					Author: &discordgo.MessageEmbedAuthor{
+						Name:    "Verification Failed",
+						IconURL: "https://cdn.discordapp.com/attachments/902975615014150174/920851081645400084/crosscircle.png",
+					},
+					Color: 16724542,
+				},
+			))
+			if err != nil {
+				log.Println("Failed to edit status message in dm channel: " + user.VerifyMessage.ChannelID)
+			}
+
+			sendChannelLog(user, fmt.Sprintf("<@%s> has failed verification due to the usage of a VPN/Proxy. \n\nIP Score: `%f` (lower is better)\nFingerprint: `%s`\nRequest ID: `%s`", user.UserID, iPCheckResult, verifyData.Fingerprint, user.RID), 16724542)
+
 			res["error"] = "IP/Proxy detected"
-			// can be rewritten as 500 instead of using fiber's exported vars
 			return ctx.Status(fiber.StatusBadRequest).JSON(res)
 		}
 
@@ -483,30 +544,67 @@ func main() {
 
 		if time.Duration(user.RTime-time.Now().UnixMilli()) > (time.Duration(verifyTimeout) * time.Minute) {
 			res["error"] = fmt.Sprintf("Link expired after %d mins.", verifyTimeout)
-			return ctx.Status(400).JSON(res)
+			return ctx.Status(fiber.StatusBadRequest).JSON(res)
 		}
 
 		// Confirm the captcha
-		result, err := recaptcha.Confirm(string(ctx.Body()), ctx.IP())
+		result, err := recaptcha.Confirm(verifyData.CaptchaToken, ctx.IP())
 		if err != nil {
 			res["error"] = "Failed to verify"
-			return ctx.Status(500).JSON(res)
+			return ctx.Status(fiber.StatusInternalServerError).JSON(res)
 		}
 
 		if !result {
+			sendChannelLog(user, fmt.Sprintf("<@%s> has failed verification due to a low captcha score. \n\nIP Score: `%f` (lower is better)\nFingerprint: `%s`\nRequest ID: `%s`", user.UserID, iPCheckResult, verifyData.Fingerprint, user.RID), 16724542)
+
 			res["error"] = "Captcha verification failed"
-			return ctx.Status(400).JSON(res)
+			return ctx.Status(fiber.StatusBadRequest).JSON(res)
 		}
 
-		err = discord.GuildMemberRoleAdd(user.RGuildID, user.UserID, user.RoleID)
+		err = discord.GuildMemberRoleAdd(user.VGuild.ID, user.UserID, user.VGuild.RoleID)
 		if err != nil {
+			sendChannelLog(user, fmt.Sprintf("<@%s> has failed verification due to an error assigning the verified role, please double check it exists & that I'm above the in the role hierarchy. \n\nIP Score: `%f` (lower is better)\nFingerprint: `%s`\nRequest ID: `%s`", user.UserID, iPCheckResult, verifyData.Fingerprint, user.RID), 16724542)
+
 			res["error"] = "Failed to add role"
-			return ctx.Status(500).JSON(res)
+			return ctx.Status(fiber.StatusInternalServerError).JSON(res)
 		}
 
-		return ctx.SendStatus(200)
+		_, err = discord.ChannelMessageEditComplex(discordgo.NewMessageEdit(user.VerifyMessage.ChannelID, user.VerifyMessage.ID).SetEmbed(
+			&discordgo.MessageEmbed{
+				Description: "Successfully verified!",
+				Author: &discordgo.MessageEmbedAuthor{
+					Name:    "Verification Passed",
+					IconURL: "https://cdn.discordapp.com/attachments/902975615014150174/920922567911571496/verified.png",
+				},
+				Color: 7789422,
+			},
+		))
+		if err != nil {
+			log.Println("Failed to edit status message in dm channel: " + user.VerifyMessage.ChannelID)
+		}
+
+		// Send to log message
+		sendChannelLog(user, fmt.Sprintf("<@%s> has passed verification. \n\nIP Score: `%f` (lower is better)\nFingerprint: `%s`\nRequest ID: `%s`", user.UserID, iPCheckResult, verifyData.Fingerprint, user.RID), 7789422)
+
+		return ctx.SendStatus(fiber.StatusOK)
 	})
 
 	color.Cyan("[i] Starting WebServer on port " + os.Getenv("PORT"))
 	log.Fatal(app.Listen(os.Getenv("PORT")))
+}
+
+func sendChannelLog(user *VUser, desc string, color int) {
+	_, err := discord.ChannelMessageSendEmbed(user.VGuild.LogsChannelID, &discordgo.MessageEmbed{
+		Author: &discordgo.MessageEmbedAuthor{
+			Name:    "Verification Result",
+			IconURL: "https://cdn.discordapp.com/attachments/902975615014150174/947836104764170250/user.png",
+		},
+		Description: desc,
+		Timestamp:   time.Now().Format("2006-01-02T15:04:05-0700"),
+		Color:       color,
+	})
+	if err != nil {
+		log.Println("Failed to send status message to logs channel: " + user.VGuild.LogsChannelID)
+		log.Println(err)
+	}
 }
