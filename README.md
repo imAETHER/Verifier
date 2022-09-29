@@ -24,4 +24,5 @@ Do note that im still learning go.
 
 # TODO
 - [X] Captcha implementation
-- [ ] Check for VPN/Proxy using some IP Api idk
+- [X] Check for VPN/Proxy
+- [ ] Prevent previously banned accounts from joining (something like ip checks or fingerprinting)
