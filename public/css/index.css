@@ -35,4 +35,5 @@ html {
      object-fit: contain;
   border: 6px solid #b32f9d;
   border-radius: 50%;
+  background: #b32f9d border-box;
 }/*# sourceMappingURL=index.css.map */
