@@ -72,10 +72,12 @@ var (
 	verificationUrl string
 	siteKey         string
 	contactEmail    string
-	commands        = []*discordgo.ApplicationCommand{
+	setupPerms      int64 = discordgo.PermissionAdministrator
+	commands              = []*discordgo.ApplicationCommand{
 		{
-			Name:        "setup",
-			Description: "The basic setup command",
+			DefaultMemberPermissions: &setupPerms,
+			Name:                     "setup",
+			Description:              "The basic setup command",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Name:        "verify-channel",
