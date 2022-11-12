@@ -73,8 +73,10 @@ var (
 	siteKey         string
 	contactEmail    string
 	setupPerms      int64 = discordgo.PermissionAdministrator
+	dmPermsFalse          = false // If theres a better way of doing this please let me know (bool -> *bool)
 	commands              = []*discordgo.ApplicationCommand{
 		{
+			DMPermission:             &dmPermsFalse,
 			DefaultMemberPermissions: &setupPerms,
 			Name:                     "setup",
 			Description:              "The basic setup command",
@@ -106,8 +108,9 @@ var (
 			},
 		},
 		{
-			Name:        "verify",
-			Description: "Sends you a DM to verify",
+			DMPermission: &dmPermsFalse,
+			Name:         "verify",
+			Description:  "Sends you a DM to verify",
 		},
 	}
 
