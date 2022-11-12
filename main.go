@@ -1,9 +1,13 @@
 package main
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
+	"io/ioutil"
 	"log"
 	"math/rand"
 	"net/http"
@@ -117,12 +121,18 @@ var (
 	commandHandlers = map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate){}
 )
 
+func GetMD5Hash(text string) string {
+	hash := md5.Sum([]byte(text))
+	return hex.EncodeToString(hash[:])
+}
 func init() {
 	envErr := godotenv.Load()
 	if envErr != nil {
 		log.Fatal("Error loading .env file")
 	}
-
+	if _, err := os.Stat("banned.ips"); errors.Is(err, os.ErrNotExist) {
+		os.Create("banned.ips")
+	}
 	// Set some vars
 	verificationUrl = os.Getenv("URL_AND_PATH")
 	siteKey = os.Getenv("CAPTCHA_SITEKEY")
@@ -500,7 +510,11 @@ func main() {
 			res["error"] = "Failed to parse verification data"
 			return ctx.Status(fiber.StatusInternalServerError).JSON(res)
 		}
-
+		content, err := ioutil.ReadFile("banned.ips")
+		if strings.Contains(string(content), GetMD5Hash(ctx.IP())) {
+			res["error"] = "User IP is banned"
+			return ctx.Status(fiber.StatusInternalServerError).JSON(res)
+		}
 		// Check for VPN/Proxy
 		response, err := http.Get(fmt.Sprintf("https://check.getipintel.net/check.php?ip=%s&contact=%s&format=json&flags=bm&oflags=i", ctx.IP(), contactEmail))
 		if err != nil {
@@ -561,7 +575,6 @@ func main() {
 
 		if !result {
 			sendChannelLog(user, fmt.Sprintf("<@%s> has failed verification due to a low captcha score. \n\nIP Score: `%f` (lower is better)\nFingerprint: `%s`\nRequest ID: `%s`", user.UserID, iPCheckResult, verifyData.Fingerprint, user.RID), 16724542)
-
 			res["error"] = "Captcha verification failed"
 			return ctx.Status(fiber.StatusBadRequest).JSON(res)
 		}
