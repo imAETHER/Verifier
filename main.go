@@ -125,6 +125,7 @@ func GetMD5Hash(text string) string {
 	hash := md5.Sum([]byte(text))
 	return hex.EncodeToString(hash[:])
 }
+
 func init() {
 	envErr := godotenv.Load()
 	if envErr != nil {

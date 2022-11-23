@@ -18,7 +18,8 @@
 
     async function onLoad() {
         const fp = await import('https://openfpcdn.io/fingerprintjs/v3')
-                .then(f => f.load());
+            .then(f => f.load())
+            .catch(() => setStatus("Disable any ads/tracker blockers and reload"));
         grecaptcha.ready(() => {
             grecaptcha.execute('{{.SiteKey}}', { action: 'submit' }).then(async (token) => {
                 let data = {
