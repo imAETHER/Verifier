@@ -26,3 +26,4 @@ Do note that im still learning go.
 - [X] Captcha implementation
 - [X] Check for VPN/Proxy
 - [ ] Prevent previously banned accounts from joining (something like ip checks or fingerprinting)
+    * Might need to use FingerprintJS Pro for this, the open-src version is not accurate enough.
