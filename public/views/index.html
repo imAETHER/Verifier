@@ -17,12 +17,12 @@
     }
 
     async function onLoad() {
-        const fp = await import('https://openfpcdn.io/fingerprintjs/v3')
+        const fp = await import('https://openfpcdn.io/fingerprintjs/v4') <!-- I recommend replacing this with a self-hosted copy -->
             .then(f => f.load())
-            .catch(() => setStatus("Disable any ads/tracker blockers and reload"));
+            .catch(() => setStatus("Disable any ad/tracker blockers and reload"));
         grecaptcha.ready(() => {
             grecaptcha.execute('{{.SiteKey}}', { action: 'submit' }).then(async (token) => {
-                let data = {
+                const data = {
                     token,
                     print: (await fp.get()).visitorId
                 }
@@ -33,7 +33,7 @@
                     headers: { 'Content-Type': 'application/json' }
                 }).then(async (response) => {
                     if (response.status !== 200) {
-                        let data = await response.json()
+                        const data = await response.json()
                         setStatus(data['error'])
                     } else {
                         setStatus("Verified! you can now close this")

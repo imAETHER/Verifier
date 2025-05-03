@@ -7,9 +7,10 @@ html {
     scroll-behavior: smooth;
     height: 100%;
     margin: 0;
-    background: #241a6b;
-    background-color: #190b59;
+    background: #12093d;
+    background-color: #12093d;
     text-shadow: #b32f9d 0px 0px 10px;
+    padding: 1.2rem;
 }
 
 .center {
@@ -17,16 +18,16 @@ html {
 
     width: fit-content;
 
-    padding: .5rem .7rem .5rem .7rem;
+    padding: .7rem 1.2rem;
     border: 2px solid #b32f9d;
-    border-radius: 1rem;
+    border-radius: 2.2rem;
     background: #b32f9d border-box;
 
     font-size: 1.5rem;
     position: relative;
     color: rgb(255, 235, 242);
 
-    top: 50%;
+    top: 45%;
     left: 50%;
 
     text-align: center;
@@ -36,7 +37,7 @@ html {
     img {
         margin-top: -10rem;
 
-        top: 2rem;
+        top: 1.5em;
         position: relative;
         object-fit: contain;
         border: 6px solid #b32f9d;
