@@ -5,6 +5,8 @@ import (
 	"os"
 	"time"
 
+	"slices"
+
 	"github.com/bwmarrin/discordgo"
 	"github.com/fatih/color"
 	"github.com/google/uuid"
@@ -25,7 +27,7 @@ var (
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Name:        "verify-channel",
-					Description: "Where the verify button will be sent to, can allow for sending messages for manual '/verify'",
+					Description: "Where the users will be able to do the '/verify' command",
 					Type:        discordgo.ApplicationCommandOptionChannel,
 					ChannelTypes: []discordgo.ChannelType{
 						discordgo.ChannelTypeGuildText,
@@ -152,19 +154,17 @@ func SetupDiscord() {
 			}
 
 			// Check if the user already has the verified role
-			for _, r := range i.Member.Roles {
-				if r == vguild.RoleID {
-					if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-						Type: discordgo.InteractionResponseChannelMessageWithSource,
-						Data: &discordgo.InteractionResponseData{
-							Flags:   discordgo.MessageFlagsEphemeral,
-							Content: "You've already been verified",
-						},
-					}); err != nil {
-						slog.Warn("Failed to send message to channel", slog.String("id", i.ChannelID))
-					}
-					return
+			if slices.Contains(i.Member.Roles, vguild.RoleID) {
+				if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionResponseChannelMessageWithSource,
+					Data: &discordgo.InteractionResponseData{
+						Flags:   discordgo.MessageFlagsEphemeral,
+						Content: "You've already been verified",
+					},
+				}); err != nil {
+					slog.Warn("Failed to send message to channel", slog.String("id", i.ChannelID))
 				}
+				return
 			}
 
 			dm, err := s.UserChannelCreate(i.Member.User.ID)
