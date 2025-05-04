@@ -1,13 +1,13 @@
-<h1 align="center">Verifier</h1>
-<img src="https://aetherclient.com/uploads/imf44/7ea667ec59.png" width="100%">
-<h3 align="center">A Discord web-based verification bot made in Go using Fiber</h3>
+<h2 align="center">
+<img width="100" src="https://github.com/user-attachments/assets/abeb23ab-9857-483c-af22-a3f94dc08403">
 
-<hr>
+A Discord web-based verification bot made in Go using [Fiber⚡️](https://github.com/gofiber/fiber)</h2>
 
-This should be ready for release, it contains a simple verification screen and stuff, you only need to set it up.<br>
-Do note that im still learning go.
+# Setup
+>[!NOTE]
+> This uses a third-party service to check IP scores, this is optional and can be disabled by leaving "EMAIL" in the env file blank.\
+> This also uses Google's reCaptcha V3 to verify the user without needing them to click any checkboxes.
 
-# Bot Setup
 - Create a Discord Bot
   - Enable the Server Members Intent
   - Give it these base permissions:
@@ -16,11 +16,7 @@ Do note that im still learning go.
     - Embed Links
     - Use Application Commands
   - Copy the token and set the `"TOKEN"` in the .env file
-
-# Usage
-- Set the port in the .env file, make sure it has a leading `:`
-- Set the `CAPTCHA_KEY` & `CAPTCHA_SECRET`, this uses Google's RECAPTCHAv3 (the hidden one)
-- Set the `VERIFY_TIMEOUT`, this is how many minutes the verification link will be valid for (default is 2 minutes).
+- Fill in `.env.example` and rename it to `.env`
 
 # TODO
 - [X] Captcha implementation
