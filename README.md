@@ -3,6 +3,8 @@
 
 A Discord web-based verification bot made in Go using [Fiber⚡️](https://github.com/gofiber/fiber)</h2>
 
+![image](https://github.com/user-attachments/assets/6c640996-a0ad-4494-bc6d-352d54a028ae)
+
 # Setup
 >[!NOTE]
 > This uses a third-party service to check IP scores, this is optional and can be disabled by leaving "EMAIL" in the env file blank.\
