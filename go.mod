@@ -5,7 +5,7 @@ go 1.23.0
 toolchain go1.23.3
 
 require (
-	github.com/gofiber/fiber/v2 v2.52.7
+	github.com/gofiber/fiber/v2 v2.52.9
 	github.com/google/uuid v1.6.0
 	github.com/lmittmann/tint v1.0.7
 	github.com/r7com/go-recaptcha-v3 v0.0.0-20200717192109-8a3916081690
